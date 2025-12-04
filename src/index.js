@@ -64,10 +64,14 @@ async function getAccessToken(email, privateKey) {
   const key = await importPrivateKey(privateKey);
   const jwt = await createJwt(email, key);
 
+  const params = new URLSearchParams();
+  params.set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
+  params.set("assertion", jwt);
+
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+    body: params.toString(),
   });
 
   if (!res.ok) {
@@ -108,7 +112,8 @@ function requireEnv(env) {
 
 // Sheet’e yazma fonksiyonu
 async function appendToSheet(token, sheetId, sheetName, value) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}!A:A:append?valueInputOption=RAW`;
+  const encodedSheetName = encodeURIComponent(sheetName);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:A:append?valueInputOption=RAW`;
 
   const body = {
     values: [[value]],
@@ -142,7 +147,13 @@ export default {
       );
 
       if (!res.ok) {
-        const txt = await res.text();
+        let txt;
+        try {
+          const json = await res.clone().json();
+          txt = JSON.stringify(json);
+        } catch (_) {
+          txt = await res.text();
+        }
         return new Response(
           `Google Sheets error:\n${txt}`,
           { status: 500 }
