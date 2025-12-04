@@ -104,10 +104,21 @@ function requireEnv(env) {
 
   return {
     clientEmail: env.GOOGLE_CLIENT_EMAIL,
-    privateKey: env.GOOGLE_PRIVATE_KEY,
+    privateKey: normalizePrivateKey(env.GOOGLE_PRIVATE_KEY),
     sheetId: env.SHEET_ID,
     sheetName: env.SHEET_NAME,
   };
+}
+
+function normalizePrivateKey(rawKey) {
+  const trimmed = rawKey.trim();
+
+  // Destek: satır sonları \n olarak kaçışmış olabilir.
+  if (trimmed.includes("\\n")) {
+    return trimmed.replace(/\\n/g, "\n");
+  }
+
+  return trimmed;
 }
 
 // Sheet’e yazma fonksiyonu
