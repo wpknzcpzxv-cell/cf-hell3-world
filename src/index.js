@@ -70,8 +70,40 @@ async function getAccessToken(email, privateKey) {
     body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
   });
 
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Token request failed: ${res.status} ${txt}`);
+  }
+
   const data = await res.json();
+
+  if (!data.access_token) {
+    throw new Error("Access token missing in token response");
+  }
+
   return data.access_token;
+}
+
+function requireEnv(env) {
+  const required = [
+    "GOOGLE_CLIENT_EMAIL",
+    "GOOGLE_PRIVATE_KEY",
+    "SHEET_ID",
+    "SHEET_NAME",
+  ];
+
+  const missing = required.filter((key) => !env?.[key]);
+
+  if (missing.length) {
+    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
+  }
+
+  return {
+    clientEmail: env.GOOGLE_CLIENT_EMAIL,
+    privateKey: env.GOOGLE_PRIVATE_KEY,
+    sheetId: env.SHEET_ID,
+    sheetName: env.SHEET_NAME,
+  };
 }
 
 // Sheet’e yazma fonksiyonu
@@ -96,17 +128,16 @@ async function appendToSheet(token, sheetId, sheetName, value) {
 export default {
   async fetch(request, env) {
     try {
-      const token = await getAccessToken(
-        env.GOOGLE_CLIENT_EMAIL,
-        env.GOOGLE_PRIVATE_KEY
-      );
+      const { clientEmail, privateKey, sheetId, sheetName } = requireEnv(env);
+
+      const token = await getAccessToken(clientEmail, privateKey);
 
       const logValue = `Ping → ${new Date().toISOString()} → ${VERSION}`;
 
       const res = await appendToSheet(
         token,
-        env.SHEET_ID,
-        env.SHEET_NAME,
+        sheetId,
+        sheetName,
         logValue
       );
 
