@@ -64,19 +64,67 @@ async function getAccessToken(email, privateKey) {
   const key = await importPrivateKey(privateKey);
   const jwt = await createJwt(email, key);
 
+  const params = new URLSearchParams();
+  params.set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
+  params.set("assertion", jwt);
+
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+    body: params.toString(),
   });
 
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Token request failed: ${res.status} ${txt}`);
+  }
+
   const data = await res.json();
+
+  if (!data.access_token) {
+    throw new Error("Access token missing in token response");
+  }
+
   return data.access_token;
+}
+
+function requireEnv(env) {
+  const required = [
+    "GOOGLE_CLIENT_EMAIL",
+    "GOOGLE_PRIVATE_KEY",
+    "SHEET_ID",
+    "SHEET_NAME",
+  ];
+
+  const missing = required.filter((key) => !env?.[key]);
+
+  if (missing.length) {
+    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
+  }
+
+  return {
+    clientEmail: env.GOOGLE_CLIENT_EMAIL,
+    privateKey: normalizePrivateKey(env.GOOGLE_PRIVATE_KEY),
+    sheetId: env.SHEET_ID,
+    sheetName: env.SHEET_NAME,
+  };
+}
+
+function normalizePrivateKey(rawKey) {
+  const trimmed = rawKey.trim();
+
+  // Destek: satır sonları \n olarak kaçışmış olabilir.
+  if (trimmed.includes("\\n")) {
+    return trimmed.replace(/\\n/g, "\n");
+  }
+
+  return trimmed;
 }
 
 // Sheet’e yazma fonksiyonu
 async function appendToSheet(token, sheetId, sheetName, value) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${sheetName}!A:A:append?valueInputOption=RAW`;
+  const encodedSheetName = encodeURIComponent(sheetName);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodedSheetName}!A:A:append?valueInputOption=RAW`;
 
   const body = {
     values: [[value]],
@@ -96,22 +144,27 @@ async function appendToSheet(token, sheetId, sheetName, value) {
 export default {
   async fetch(request, env) {
     try {
-      const token = await getAccessToken(
-        env.GOOGLE_CLIENT_EMAIL,
-        env.GOOGLE_PRIVATE_KEY
-      );
+      const { clientEmail, privateKey, sheetId, sheetName } = requireEnv(env);
+
+      const token = await getAccessToken(clientEmail, privateKey);
 
       const logValue = `Ping → ${new Date().toISOString()} → ${VERSION}`;
 
       const res = await appendToSheet(
         token,
-        env.SHEET_ID,
-        env.SHEET_NAME,
+        sheetId,
+        sheetName,
         logValue
       );
 
       if (!res.ok) {
-        const txt = await res.text();
+        let txt;
+        try {
+          const json = await res.clone().json();
+          txt = JSON.stringify(json);
+        } catch (_) {
+          txt = await res.text();
+        }
         return new Response(
           `Google Sheets error:\n${txt}`,
           { status: 500 }
